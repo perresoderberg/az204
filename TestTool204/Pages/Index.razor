@@ -1,0 +1,16 @@
+﻿@page "/"
+
+@inject IJSRuntime jsRuntime
+
+<PageTitle>Index</PageTitle>
+
+<h1>First page</h1>
+
+<button class="btn btn-primary" @onclick="Download">Download File</button>
+
+@code {
+    public async Task Download()
+    {
+        await jsRuntime.InvokeVoidAsync("download", "api/file", "Example");
+    }
+}

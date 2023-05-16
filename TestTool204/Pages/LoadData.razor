@@ -1,0 +1,330 @@
+﻿@page "/loaddata"
+
+@using System.Text.Json;
+@using System.Text;
+@using System.Net.Http.Headers;
+@using Newtonsoft.Json;
+@using TestTool204.Core.Domain;
+@using static TestTool204.Core.Domain.G;
+@using static TestTool204.Core.Domain.Answer;
+
+@inject HttpClient httpClient
+@inject IJSRuntime jsRuntime
+
+<PageTitle>Questions</PageTitle>
+
+<table width="100%">
+    <tr><td width="40%">Easy list</td><td>Hard list</td></tr>
+    <tr><td><span id="easy"></span></td><td><span id="hard"></span></td></tr>
+</table>
+
+<h1>
+    Question number @question?.questionNumber
+</h1>
+
+
+@if (question == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <span>
+    <button class="btn btn-primary" @onclick="SetEasy">Easy</button>
+    <button class="btn btn-primary" @onclick="SetHard">Hard</button>
+        <p @onclick="GenerateLog"><b>Generate Log</b></p>
+    </span>
+    
+        <form method="post" name="postform">
+
+        @if (question.answerKind == AnswerKind.Dropdown)
+        {
+            var idx1 = 0;
+            var idx2 = 0;
+            foreach (var group in @question.answers.Select(x => x.answerDropdownGroup).Distinct())
+            {
+                string dropdownname = $"dropdown{group}";
+                idx2 = @question.wholeText.IndexOf(dropdownname);
+                if (idx2 == -1)
+                    idx2 = @question.wholeText.Length;
+
+                var idx_tmp = idx2 - idx1;
+                if (idx_tmp > @question.wholeText.Length + idx1)
+                    idx_tmp = @question.wholeText.Length + idx1 -1;
+                <span>
+                @question.wholeText.Substring(idx1, idx_tmp);
+
+                </span>
+
+                <select id=@dropdownname name="dropdown" @onmouseup="() => CheckAnswerAsync()">
+                    <option id="0"></option>
+                        @foreach (var a in question.answers.Where(x => x.answerDropdownGroup == group))
+                        {
+                            <option id="@a.answerNumber">
+                            @a.answerText
+                            </option>
+                        }
+                </select>
+                idx1 = idx2+9;
+            }
+            <span>
+                @question.wholeText.Substring(idx1);
+            </span>
+        }
+        else
+        {
+            @foreach (var txt in question.text)
+            {
+                if (txt.Substring(0, 5).ToLower() == "image")
+                {
+                    <img src="@question.images[Int32.Parse(txt.Substring(5, 1))-1]"/>
+                }
+                else
+                {
+                    @txt
+                }
+                <br />
+            }
+            <br />
+        }
+
+        <div id="div_answers">
+        @foreach (var answer in question.answers)
+        {
+            @if (answer.answerType == AnswerType.SingleSelect)
+            {
+                    <div id="@answer.answerNumber" name="@answer.answerNumber" data-id="@answer.isCorrectAnswer">
+                        <input type="radio" id="@answer.answerNumber" name="@answer.answerNumber" data-id="@answer.isCorrectAnswer" value="@answer.answerNumber" checked="@this.IsChecked(answer.answerNumber)" @onmouseup="() => {Update(answer.answerNumber);CheckAnswerAsync();}">
+                        <label>@answer.answerText</label>
+                    </div>
+                
+            }
+            @if (answer.answerType == AnswerType.MultiSelect)
+            {
+                <div id="@answer.answerNumber" name="@answer.answerNumber" data-id="@answer.isCorrectAnswer">
+                    @if(answer.disableOption==1)
+                    {
+                        <b>
+                            <label>@answer.answerText.Substring(1, @answer.answerText.Length-2)</label>
+                        </b>
+                    }
+                    else
+                    {
+                        <input type="checkbox" id="@answer.answerNumber" value="@answer.answerNumber" name="@question.questionNumber" checked="@this.IsChecked(answer.answerNumber)" @onclick="() => Update(answer.answerNumber)">
+                        <label>@answer.answerText</label>
+                    }
+                </div>
+            }
+            @if (answer.answerType == AnswerType.OrderSelect)
+            {
+                    <div id="@answer.answerNumber" name="@answer.answerNumber" data-id="@answer.isCorrectAnswer">
+                        @if (answer.disableOption == 1)
+                        {
+                            <b>
+                                <label>@answer.answerText.Substring(1, @answer.answerText.Length-2)</label>
+                            </b>
+                        }
+                        else
+                        {
+                            <select name="selectoption" id="@answer.answerNumber">
+                                @for(var i = 0;i<10;i++)
+                                {
+                                    <option id="@i" value="@i">
+                                        @if(i!=0)
+                                            @i
+                                     </option>
+                                }
+                            </select>
+
+                            <input type="checkbox" id="@answer.answerNumber" value="@answer.answerNumber" name="@question.questionNumber" checked="@this.IsChecked(answer.answerNumber)" @onclick="() => Update(answer.answerNumber)">
+                            <label>@string.Join(',', @answer.groupings)</label>
+                        }
+                    </div>
+            }
+        }
+        </div>
+        <br />
+        <div id="explanation" style="visibility:hidden">
+        @foreach (var txt in question.answerMisc)
+        {
+                if (@txt.Length>4 && @txt.Substring(0, 4) == "http")
+                {
+                    <a href="@txt" target="_blank">@txt</a>
+                }
+                else
+                {
+                    @txt
+                }
+
+            <br />
+        }
+        </div>
+        <br />
+
+    </form>
+    <button class="btn btn-primary" @onclick="ShowExplantion">Show explantion</button>
+    <button class="btn btn-primary" @onclick="GetPrevQuestionAsync">Prev question</button>
+    <button class="btn btn-primary" @onclick="GetNextQuestionAsync">Next question</button>
+
+}
+
+
+@code {
+
+    QandA? question = null;
+
+    List<string> rightList = new List<string>(){ "1", "2" };
+    List<string> leftList = new List<string>() { "3", "4" };
+
+    int questionQueueNumber = 0;
+
+    List<int> my_selection = new List<int>();
+    List<int> easy_list = new List<int>();
+    List<int> hard_list = new List<int>();
+
+    public async Task MoveRight(int id)
+    {
+        leftList.RemoveAll(x => x == id.ToString());
+        rightList.Add(id.ToString());
+
+        await jsRuntime.InvokeVoidAsync("populatelists", leftList.ToArray(), rightList.ToArray());
+    }
+    public async Task MoveLeft(int id)
+    {
+        rightList.RemoveAll(x => x == id.ToString());
+        leftList.Add(id.ToString());
+
+        await jsRuntime.InvokeVoidAsync("populatelists", leftList, rightList);
+    }
+
+    public async Task SetEasy()
+    {
+        easy_list.Add(question.questionNumber);
+        await jsRuntime.InvokeVoidAsync("updategeneratelist", "easy", easy_list.ToArray());
+    }
+    public async Task SetHard()
+    {
+        hard_list.Add(question.questionNumber);
+        await jsRuntime.InvokeVoidAsync("updategeneratelist", "hard", hard_list.ToArray());
+    }
+    private void Update(int value)
+    {
+        if (question.answers.First().answerType == AnswerType.SingleSelect)
+        {
+            my_selection.Clear();
+            my_selection.Add(value);
+        }
+        else
+        {
+            if (my_selection.Contains(value))
+                my_selection.RemoveAll(x => x == value);
+            else
+                my_selection.Add(value);
+        }
+    }
+
+    private bool IsChecked(int answerNumber) => my_selection.Contains(answerNumber);
+
+    public async Task ShowExplantion()
+    {
+        await jsRuntime.InvokeVoidAsync("showexplantion");
+        CheckAnswerAsync();
+    }
+    public async Task CheckAnswerAsync()
+    {
+        List<int[]> correct_dropdown_answers = new List<int[]>();
+        List<int> correct_select_answers = new List<int>();
+
+        if (question != null)
+        {
+            if(question.answerKind == AnswerKind.Dropdown)
+            {
+                var groups = question.answers.Select(x => x.answerDropdownGroup).Distinct().ToList();
+                foreach (var g in groups)
+                {
+                    var thisgroup = question.answers.Where(x => x.answerDropdownGroup == g).ToList();
+                    for (int i = 0; i < thisgroup.Count; i++)
+                    {
+                        if (thisgroup[i].isCorrectAnswer == 1)
+                            correct_dropdown_answers.Add(new[] {g, i+1});
+                    }
+                }
+            }
+            if (question.answerKind == AnswerKind.OrderGroups)
+            {
+                correct_select_answers = question.answers.Where(x => x.questionOrder > 0).OrderBy(x => x.questionOrder).Select(x => x.answerNumber).ToList();
+            }
+            else
+            {
+                correct_select_answers = question.answers.Where(x => x.isCorrectAnswer == 1).Select(x => x.answerNumber).ToList();
+            }
+            await jsRuntime.InvokeVoidAsync("checkanswer", my_selection, question.answerKind, correct_select_answers, correct_dropdown_answers);
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var response = await httpClient.GetAsync("api/Main/Initialize");
+        await GetNextQuestionAsync();
+
+        if (question != null && question.answerKind == AnswerKind.OrderGroups)
+            await jsRuntime.InvokeVoidAsync("populatelists", leftList.ToArray(), rightList.ToArray());
+    }
+    protected async Task GetPrevQuestionAsync()
+    {
+        int queueNumber = 0;
+        if (question != null)
+            queueNumber = question.currentQueueNumber;
+
+        await GetQuestionAsync(queueNumber - 1);
+    }
+    protected async Task GetNextQuestionAsync()
+    {
+        int queueNumber = 0;
+        if (question!=null)
+            queueNumber = question.currentQueueNumber;
+
+        await GetQuestionAsync(queueNumber + 1);
+    }
+    protected async Task GetQuestionAsync(int currentQueueNumber)
+    {
+        await jsRuntime.InvokeVoidAsync("reset");
+
+        my_selection = new List<int>();
+        var response = await httpClient.GetAsync($"api/Main/GetQuestion?currentQueueNumber={currentQueueNumber}");
+
+        if (response.IsSuccessStatusCode)
+        {
+            using (var reponseStream = await response.Content.ReadAsStreamAsync())
+            {
+                question = await System.Text.Json.JsonSerializer.DeserializeAsync<QandA>(reponseStream);
+            }
+        }
+    }
+
+    protected async Task GenerateLog()
+    {
+        GenerateList generatedList2 = new GenerateList()
+        {
+             easyList = easy_list, 
+             hardList = hard_list
+        };
+
+        var generatedList = JsonConvert.SerializeObject(generatedList2);
+
+        var response = await httpClient.GetAsync($"api/Main/GenerateLog?GenerateList={generatedList}");
+
+        //HttpResponseMessage response = await httpClient.PostAsJsonAsync("api/Main/GenerateLog", generatedList);
+        
+        //var lst_Company = await response.Content.ReadFromJsonAsync<GenerateList>();
+
+        //if (response.IsSuccessStatusCode)
+        //{
+        //    using (var reponseStream = await response.Content.ReadAsStreamAsync())
+        //    {
+        //        question = await System.Text.Json.JsonSerializer.DeserializeAsync<QandA>(reponseStream);
+        //    }
+        //}
+
+    }
+}
