@@ -2,7 +2,6 @@
   "profiles": {
     "TestTool204": {
       "commandName": "Project",
-      "commandLineArgs": "dotnet TestTool204.dll",
       "launchBrowser": true,
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
